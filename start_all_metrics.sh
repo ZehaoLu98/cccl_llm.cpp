@@ -146,10 +146,8 @@ grp3_sub6=(
 run "${grp3_sub6[@]}"
 
 grp3_sub7=(
-  "lts__t_requests_srcunit_l1_op_read.sum"
-  "lts__t_requests_srcunit_l1_op_write.sum"
-  "lts__t_sectors_op_read.sum"
-  "lts__t_sectors_op_write.sum"
+  "lts__t_sectors_srcunit_tex_op_read.sum"
+  "lts__t_sectors_srcunit_tex_op_write.sum"
 )
 run "${grp3_sub7[@]}"
 
