@@ -1,0 +1,3 @@
+[submodule "GMP"]
+	path = GMP
+	url = https://github.com/ZehaoLu98/GMP.git
