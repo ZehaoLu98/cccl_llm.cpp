@@ -1568,8 +1568,6 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         softmax_forward(acts.probs, acts.logits, B*T, V);
         model.mean_loss = -1.0f;
     }
-
-    curr_step++;
 }
 
 void gpt2_zero_grad(GPT2 &model) {
@@ -2100,6 +2098,7 @@ int main(int argc, char *argv[]) {
     GmpProfiler::getInstance()->init();
     GmpProfiler::getInstance()->startRangeProfiling();
     for (int step = 0; step <= train_num_batches; step++) {
+        curr_step = step;
         int last_step = step == train_num_batches;
 
         // // once in a while estimate the validation loss
