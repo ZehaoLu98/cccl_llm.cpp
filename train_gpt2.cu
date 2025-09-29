@@ -1549,6 +1549,11 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
     if(curr_step == 1)GmpProfiler::getInstance()->popRange("lm_head", GmpProfileType::CONCURRENT_KERNEL);
     #endif
 
+    #ifdef PROFILE_FORWARD
+    if(curr_step == 1)GmpProfiler::getInstance()->pushRange("softmax_cross_entropy_forward", GmpProfileType::CONCURRENT_KERNEL);
+    #endif
+    GMP_TIMED("softmax_cross_entropy_forward",
+    {
     // also forward the cross-entropy loss function if we have the targets
     if (targets != NULL) {
         // fused classifier: does the forward pass and first part of the backward pass
@@ -1568,6 +1573,10 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         softmax_forward(acts.probs, acts.logits, B*T, V);
         model.mean_loss = -1.0f;
     }
+    });
+    #ifdef PROFILE_FORWARD
+    if(curr_step == 1)GmpProfiler::getInstance()->popRange("softmax_cross_entropy_forward", GmpProfileType::CONCURRENT_KERNEL);
+    #endif
 }
 
 void gpt2_zero_grad(GPT2 &model) {
@@ -2041,12 +2050,12 @@ int main(int argc, char *argv[]) {
             GmpProfiler::getInstance()->addMetrics(argv[i]);
         }  
     }
-
+    
     // read in the (optional) command line arguments
     const char* input_dataset_prefix = "data/tiny_shakespeare"; // or e.g. data/TinyStories
     const char* output_log_file = NULL;
-    int B = 16; // batch size
-    int T = 512; // sequence length max
+    int B = 4; // batch size
+    int T = 64; // sequence length max
     float learning_rate = 1e-4f;
     int val_loss_every = 20; // every how many steps do we eval validation loss?
     int val_max_batches = 20; // how many batches max do we eval for validation loss?
