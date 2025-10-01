@@ -50,7 +50,7 @@ the layernorms are connected to the residuals so we += in layernorm backward.
 #include "gmp/profile.h"
 #include "gmp/log.h"
 
-#define PROFILE_FORWARD
+// #define PROFILE_FORWARD
 #define PROFILE_BACKWARD
 
 int curr_step = 0;
@@ -1647,7 +1647,7 @@ void gpt2_backward(GPT2 &model) {
     #ifdef PROFILE_BACKWARD
     if(curr_step == 1)GmpProfiler::getInstance()->pushRange("lm_head_backward", GmpProfileType::CONCURRENT_KERNEL);
     #endif
-    GMP_TIMED("lm_head_backward"， matmul_backward(grads_acts.lnf, grads.wte, NULL, acts.logits, acts.lnf, params.wte, B, T, C, V));
+    GMP_TIMED("lm_head_backward", matmul_backward(grads_acts.lnf, grads.wte, NULL, acts.logits, acts.lnf, params.wte, B, T, C, V));
     #ifdef PROFILE_BACKWARD
     if(curr_step == 1)GmpProfiler::getInstance()->popRange("lm_head_backward", GmpProfileType::CONCURRENT_KERNEL);
     #endif
@@ -1718,9 +1718,12 @@ void gpt2_backward(GPT2 &model) {
         #ifdef PROFILE_BACKWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("MLP", GmpProfileType::CONCURRENT_KERNEL);
         #endif
+        GMP_TIMED("MLP",
+        {
         matmul_backward(dl_fch_gelu, dl_fcprojw, dl_fcprojb, dresidual, l_fch_gelu, l_fcprojw, B, T, 4*C, C);
         gelu_backward(dl_fch, l_fch, dl_fch_gelu, B*T*4*C);
         matmul_backward(dl_ln2, dl_fcw, dl_fcb, dl_fch, l_ln2, l_fcw, B, T, C, 4*C);
+        });
         #ifdef PROFILE_BACKWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("MLP", GmpProfileType::CONCURRENT_KERNEL);
         #endif
@@ -1728,24 +1731,30 @@ void gpt2_backward(GPT2 &model) {
         #ifdef PROFILE_BACKWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("ln2_backward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
+        GMP_TIMED("ln2_backward",
         layernorm_backward(dresidual, dl_ln2w, dl_ln2b, dl_ln2, l_residual2, l_ln2w, l_ln2_mean, l_ln2_rstd, B, T, C);
+        );
         #ifdef PROFILE_BACKWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("ln2_backward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
         #ifdef PROFILE_BACKWARD
-        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("Attention", GmpProfileType::CONCURRENT_KERNEL);
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_backward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
+        GMP_TIMED("attention_backward",
         matmul_backward(dl_atty, dl_attprojw, dl_attprojb, dresidual, l_atty, l_attprojw, B, T, C, C);
         attention_backward(dl_qkv, dl_qkvr, dl_preatt, dl_att, dl_v_accum, dl_atty, l_qkv, l_qkvr, l_att, B, T, C, NH);
         matmul_backward(dl_ln1, dl_qkvw, dl_qkvb, dl_qkv, l_ln1, l_qkvw, B, T, C, 3*C);
+        );
         #ifdef PROFILE_BACKWARD
-        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("Attention", GmpProfileType::CONCURRENT_KERNEL);
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("attention_backward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
         // layernorm backward does += to dresidual, so it correctly accumulates gradient for the Attention block above
         #ifdef PROFILE_BACKWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("ln1_backward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
+        GMP_TIMED("ln1_backward",
         layernorm_backward(dresidual, dl_ln1w, dl_ln1b, dl_ln1, residual, l_ln1w, l_ln1_mean, l_ln1_rstd, B, T, C);
+        );
         #ifdef PROFILE_BACKWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("ln1_backward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
@@ -1753,7 +1762,9 @@ void gpt2_backward(GPT2 &model) {
     #ifdef PROFILE_BACKWARD
     if(curr_step == 1)GmpProfiler::getInstance()->pushRange("embedding_backward", GmpProfileType::CONCURRENT_KERNEL);
     #endif
+    GMP_TIMED("embedding_backward",
     encoder_backward(grads.wte, grads.wpe, dresidual, thrust::raw_pointer_cast(model.inputs.data()), B, T, C);
+    );
     #ifdef PROFILE_BACKWARD
     if(curr_step == 1)GmpProfiler::getInstance()->popRange("embedding_backward", GmpProfileType::CONCURRENT_KERNEL);
     #endif
