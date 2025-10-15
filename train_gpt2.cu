@@ -1000,7 +1000,7 @@ void attention_forward(float* out, float* vaccum, float* qkvr, float* preatt, fl
     // y = att @ v # (B, nh, T, T) @ (B, nh, T, hs) -> (B, nh, T, hs)
     cublasCheck(cublasSgemmStridedBatched(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, HS, T, T, &alpha, v, HS, T * HS, att, T, T * T, &beta, vaccum, HS, T * HS, B * NH));
     #ifdef PROFILE_SEPERATE_ATTENTION
-    if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_v", GmpProfileType::CONCURRENT_KERNEL);
+    if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("attention_v", GmpProfileType::CONCURRENT_KERNEL);
     #endif
     // now unpermute
     // y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
