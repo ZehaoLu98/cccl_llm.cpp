@@ -50,7 +50,10 @@ the layernorms are connected to the residuals so we += in layernorm backward.
 #include "gmp/profile.h"
 #include "gmp/log.h"
 
-#define PROFILE_SEPERATE_ATTENTION
+// #define PROFILE_SEPARATE_ATTENTION
+
+#define PROFILE_SEPARATE_MLP
+
 // #define PROFILE_FORWARD
 // #define PROFILE_BACKWARD
 
@@ -1519,9 +1522,27 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("feed_forward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
         GMP_TIMED("feed_forward",{
+        #ifdef PROFILE_SEPARATE_MLP
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("feed_forward_1", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
             matmul_forward_cublaslt(l_fch, l_ln2, l_fcw, l_fcb, B, T, C, 4*C);
+        #ifdef PROFILE_SEPARATE_MLP
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("feed_forward_1", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
+        #ifdef PROFILE_SEPARATE_MLP
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("feed_forward_gelu", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
             gelu_forward(l_fch_gelu, l_fch, B*T*4*C);
+        #ifdef PROFILE_SEPARATE_MLP
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("feed_forward_gelu", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
+        #ifdef PROFILE_SEPARATE_MLP
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("feed_forward_2", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
             matmul_forward_cublaslt(l_fcproj, l_fch_gelu, l_fcprojw, l_fcprojb, B, T, 4*C, C);
+        #ifdef PROFILE_SEPARATE_MLP
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("feed_forward_2", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
         });
         #ifdef PROFILE_FORWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("feed_forward", GmpProfileType::CONCURRENT_KERNEL);
