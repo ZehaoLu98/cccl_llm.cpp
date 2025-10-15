@@ -50,8 +50,9 @@ the layernorms are connected to the residuals so we += in layernorm backward.
 #include "gmp/profile.h"
 #include "gmp/log.h"
 
+#define PROFILE_SEPERATE_ATTENTION
 // #define PROFILE_FORWARD
-#define PROFILE_BACKWARD
+// #define PROFILE_BACKWARD
 
 int curr_step = 0;
 
@@ -973,18 +974,34 @@ void attention_forward(float* out, float* vaccum, float* qkvr, float* preatt, fl
     // batched matrix multiply with cuBLAS
     const float alpha = 1.0f;
     const float beta = 0.0f;
+    #ifdef PROFILE_SEPERATE_ATTENTION
+    if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_qk", GmpProfileType::CONCURRENT_KERNEL);
+    #endif
     cublasCheck(cublasSgemmStridedBatched(cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N, T, T, HS, &alpha, k, HS, T * HS, q, HS, T * HS, &beta, preatt, T, T * T, B * NH));
-
+    #ifdef PROFILE_SEPERATE_ATTENTION
+    if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("attention_qk", GmpProfileType::CONCURRENT_KERNEL);
+    #endif
     // multiply all elements of preatt elementwise by scale
     float scale = 1.0 / sqrtf(HS);
     int grid_size = CEIL_DIV(B * NH * T * 32, softmax_block_size);
+    #ifdef PROFILE_SEPERATE_ATTENTION
+    if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_softmax", GmpProfileType::CONCURRENT_KERNEL);
+    #endif
     softmax_forward_kernel5<<<grid_size, softmax_block_size>>>(att, scale, preatt, B * NH, T);
+    #ifdef PROFILE_SEPERATE_ATTENTION
+    if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("attention_softmax", GmpProfileType::CONCURRENT_KERNEL);
+    #endif
     cudaCheck(cudaGetLastError());
 
+    #ifdef PROFILE_SEPERATE_ATTENTION
+    if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_v", GmpProfileType::CONCURRENT_KERNEL);
+    #endif
     // new approach: first cuBLAS another batched matmul
     // y = att @ v # (B, nh, T, T) @ (B, nh, T, hs) -> (B, nh, T, hs)
     cublasCheck(cublasSgemmStridedBatched(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, HS, T, T, &alpha, v, HS, T * HS, att, T, T * T, &beta, vaccum, HS, T * HS, B * NH));
-
+    #ifdef PROFILE_SEPERATE_ATTENTION
+    if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_v", GmpProfileType::CONCURRENT_KERNEL);
+    #endif
     // now unpermute
     // y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
@@ -1466,17 +1483,19 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         #ifdef PROFILE_FORWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("ln1", GmpProfileType::CONCURRENT_KERNEL);
         #endif
-        #ifdef PROFILE_FORWARD
-        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention", GmpProfileType::CONCURRENT_KERNEL);
-        #endif
+
         GMP_TIMED("attention",{
+        #ifdef PROFILE_SEPERATE_ATTENTION
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_get_qkv", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
             matmul_forward_cublaslt(l_qkv, l_ln1, l_qkvw, l_qkvb, B, T, C, 3*C);
+        #ifdef PROFILE_SEPERATE_ATTENTION
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("attention_get_qkv", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
             attention_forward(l_atty, l_v_accum, l_qkvr, l_preatt, l_att, l_qkv, B, T, C, NH);
             matmul_forward_cublaslt(l_attproj, l_atty, l_attprojw, l_attprojb, B, T, C, C);
         });
-        #ifdef PROFILE_FORWARD
-        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("attention", GmpProfileType::CONCURRENT_KERNEL);
-        #endif
+
         #ifdef PROFILE_FORWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("residual1", GmpProfileType::CONCURRENT_KERNEL);
         #endif
