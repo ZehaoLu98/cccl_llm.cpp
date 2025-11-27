@@ -52,9 +52,9 @@ the layernorms are connected to the residuals so we += in layernorm backward.
 
 // #define PROFILE_SEPARATE_ATTENTION
 
-#define PROFILE_SEPARATE_MLP
+// #define PROFILE_SEPARATE_MLP
 
-// #define PROFILE_FORWARD
+#define PROFILE_FORWARD
 // #define PROFILE_BACKWARD
 
 int curr_step = 0;
@@ -1487,6 +1487,9 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("ln1", GmpProfileType::CONCURRENT_KERNEL);
         #endif
 
+        #if !defined(PROFILE_SEPERATE_ATTENTION) && defined(PROFILE_FORWARD)
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
         GMP_TIMED("attention",{
         #ifdef PROFILE_SEPERATE_ATTENTION
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_get_qkv", GmpProfileType::CONCURRENT_KERNEL);
@@ -1498,15 +1501,16 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
             attention_forward(l_atty, l_v_accum, l_qkvr, l_preatt, l_att, l_qkv, B, T, C, NH);
             matmul_forward_cublaslt(l_attproj, l_atty, l_attprojw, l_attprojb, B, T, C, C);
         });
+        #if !defined(PROFILE_SEPERATE_ATTENTION) && defined(PROFILE_FORWARD)
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("attention", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
 
         #ifdef PROFILE_FORWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("residual1", GmpProfileType::CONCURRENT_KERNEL);
         #endif
         GMP_TIMED("residual1",
         {
-            nvtxRangePushA("residual1");
             residual_forward(l_residual2, residual, l_attproj, B*T*C);
-            nvtxRangePop();
         });
         #ifdef PROFILE_FORWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("residual1", GmpProfileType::CONCURRENT_KERNEL);
@@ -1518,7 +1522,8 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         #ifdef PROFILE_FORWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("ln2", GmpProfileType::CONCURRENT_KERNEL);
         #endif
-        #ifdef PROFILE_FORWARD
+
+        #if !defined(PROFILE_SEPARATE_MLP) && defined(PROFILE_FORWARD)
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("feed_forward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
         GMP_TIMED("feed_forward",{
@@ -1544,7 +1549,7 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("feed_forward_2", GmpProfileType::CONCURRENT_KERNEL);
         #endif
         });
-        #ifdef PROFILE_FORWARD
+        #if !defined(PROFILE_SEPARATE_MLP) && defined(PROFILE_FORWARD)
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("feed_forward", GmpProfileType::CONCURRENT_KERNEL);
         #endif
         #ifdef PROFILE_FORWARD
@@ -2105,7 +2110,7 @@ int main(int argc, char *argv[]) {
     // read in the (optional) command line arguments
     const char* input_dataset_prefix = "data/tiny_shakespeare"; // or e.g. data/TinyStories
     const char* output_log_file = NULL;
-    int B = 4; // batch size
+    int B = 109; // batch size
     int T = 64; // sequence length max
     float learning_rate = 1e-4f;
     int val_loss_every = 20; // every how many steps do we eval validation loss?
