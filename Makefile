@@ -57,7 +57,7 @@ test_gpt2: test_gpt2.c
 
 # possibly may want to disable warnings? e.g. append -Xcompiler -Wno-unused-result
 train_gpt2cu: train_gpt2.cu gmp
-	nvcc -O3 -INVTX/c/include train_gpt2.cu --use_fast_math --extended-lambda -arch=sm_80 -lnvToolsExt -IGMP/include  -LGMP/lib -lgmp -lcublas -lcublasLt -lcupti -lcuda -lcudart -o $@
+	nvcc -O3 -INVTX/c/include train_gpt2.cu --use_fast_math --extended-lambda -arch=sm_80 -lnvToolsExt -IGMP/include  -LGMP/lib -lgmp -lcublas -lcublasLt -lcheckpoint -lcupti -lcuda -lcudart -o $@
 
 test_gpt2cu: test_gpt2.cu
 	nvcc -O3 --use_fast_math $< -lcublas -lcublasLt -o $@

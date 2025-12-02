@@ -17,7 +17,7 @@ target_link_libraries(train_gpt2 PRIVATE OpenMP::OpenMP_CXX)
 
 find_package(CUDAToolkit)
 add_executable(train_gpt2cu train_gpt2.cu)
-target_link_libraries(train_gpt2cu CCCL::CCCL CUDA::cublas CUDA::cublasLt)
+target_link_libraries(train_gpt2cu CCCL::CCCL CUDA::cublas CUDA::cublasLt CUDA::checkpoint)
 target_compile_options(train_gpt2cu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-O3 --use_fast_math --extended-lambda>)
 
 add_subdirectory(benches)

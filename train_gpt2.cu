@@ -46,15 +46,18 @@ the layernorms are connected to the residuals so we += in layernorm backward.
 #include <cuda/std/mdspan>
 #include <cuda/atomic>
 #include <nvtx3/nvtx3.hpp>
+#include <cupti_checkpoint.h>
 
 #include "gmp/profile.h"
 #include "gmp/log.h"
 
+using NV::Cupti::Checkpoint::CUpti_Checkpoint;
+
 // #define PROFILE_SEPARATE_ATTENTION
 
-#define PROFILE_SEPARATE_MLP
+// #define PROFILE_SEPARATE_MLP
 
-// #define PROFILE_FORWARD
+#define PROFILE_FORWARD
 // #define PROFILE_BACKWARD
 
 int curr_step = 0;
@@ -1477,7 +1480,9 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         // need not be stored for backward
         float* l_preatt = acts.preatt;
         float* l_v_accum = acts.v_accum;
-
+         if(l==1 && curr_step == 1){
+            GMP_LOG_DEBUG("START Profiling");
+         }
         // now do the forward pass
         #ifdef PROFILE_FORWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("ln1", GmpProfileType::CONCURRENT_KERNEL);
@@ -1487,6 +1492,9 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("ln1", GmpProfileType::CONCURRENT_KERNEL);
         #endif
 
+        #if defined(PROFILE_FORWARD) && !defined(PROFILE_SEPERATE_ATTENTION)
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
         GMP_TIMED("attention",{
         #ifdef PROFILE_SEPERATE_ATTENTION
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("attention_get_qkv", GmpProfileType::CONCURRENT_KERNEL);
@@ -1498,6 +1506,9 @@ void gpt2_forward(GPT2 &model, int* inputs, int* targets, int B, int T) {
             attention_forward(l_atty, l_v_accum, l_qkvr, l_preatt, l_att, l_qkv, B, T, C, NH);
             matmul_forward_cublaslt(l_attproj, l_atty, l_attprojw, l_attprojb, B, T, C, C);
         });
+        #if defined(PROFILE_FORWARD) && !defined(PROFILE_SEPERATE_ATTENTION)
+        if(l==1 && curr_step == 1)GmpProfiler::getInstance()->popRange("attention", GmpProfileType::CONCURRENT_KERNEL);
+        #endif
 
         #ifdef PROFILE_FORWARD
         if(l==1 && curr_step == 1)GmpProfiler::getInstance()->pushRange("residual1", GmpProfileType::CONCURRENT_KERNEL);
@@ -2197,87 +2208,104 @@ int main(int argc, char *argv[]) {
     // train
     struct timespec start, end;
     double total_sum_iteration_time_s = 0.0;
+
     GmpProfiler::getInstance()->init();
-    GmpProfiler::getInstance()->startRangeProfiling();
-    for (int step = 0; step <= train_num_batches; step++) {
-        curr_step = step;
-        int last_step = step == train_num_batches;
 
-        // // once in a while estimate the validation loss
-        // if (step % val_loss_every == 0 || last_step) {
-        //     float val_loss = 0.0f;
-        //     dataloader_reset(&val_loader);
-        //     for (int i = 0; i < val_num_batches; i++) {
-        //         dataloader_next_batch(&val_loader);
-        //         gpt2_forward(model, val_loader.inputs(), val_loader.targets(), B, T);
-        //         val_loss += model.mean_loss;
-        //     }
-        //     val_loss /= val_num_batches;
-        //     printf("val loss %f\n", val_loss);
-        //     logger_log_val(&logger, step, val_loss);
-        // }
+    CUpti_Checkpoint handle{CUpti_Checkpoint_STRUCT_SIZE};
+    handle.optimizations = 1;
+    // Retain current context
+    CUcontext cuContext;
+    DRIVER_API_CALL(cuDevicePrimaryCtxRetain(&cuContext, 0));
+    handle.ctx = cuContext;
 
-        // // once in a while do model inference to print generated text
-        // if (step > 0 && step % sample_every == 0 || last_step) {
-        //     // fill up gen_tokens with the GPT2_EOT, which kicks off the generation
-        //     for(int i = 0; i < B * T; ++i) {
-        //         gen_tokens[i] = GPT2_EOT;
-        //     }
-        //     // now sample from the model autoregressively
-        //     printf("generating:\n---\n");
-        //     for (int t = 1; t < genT; t++) {
-        //         // note that inference is very wasteful here because for each token
-        //         // we re-calculate the forward pass for all of (B,T) positions from scratch
-        //         // but the inference here is just for sanity checking anyway
-        //         // and we can maybe optimize a bit more later, with careful tests
-        //         gpt2_forward(model, gen_tokens.get(), NULL, B, T);
-        //         // furthermore, below we're only using b=0 (i.e. the first row) of all B rows
-        //         // we're in principle running B "inference streams" in parallel here
-        //         // only using position 0 because it's a bit faster (copy less probs from GPU -> CPU)
-        //         // get the V-dimensional vector probs[0, t-1, :]
-        //         float* probs = model.acts.probs + (t-1) * model.config.vocab_size;
-        //         // move probs back to CPU and sample
-        //         thrust::copy_n(thrust::device_pointer_cast(probs), model.config.vocab_size, cpu_probs.begin());
-        //         float coin = random_f32(&rng_state);
-        //         int next_token = sample_mult(cpu_probs, model.config.vocab_size, coin);
-        //         gen_tokens[t] = next_token;
-        //         // print the generated token, either using the Tokenizer or a fallback
-        //         if (tokenizer.init_ok) {
-        //             const char* token_str = tokenizer_decode(&tokenizer, next_token);
-        //             safe_printf(token_str);
-        //         } else {
-        //             // fall back to printing the token id
-        //             printf("%d ", next_token);
-        //         }
-        //         fflush(stdout);
-        //     }
-        //     printf("\n---\n");
-        // }
+    NV::Cupti::Checkpoint::cuptiCheckpointSave(&handle);
+    auto numPasses = GmpProfiler::getInstance()->getNumPasses();
 
-        // bit confusing: we want to make sure to eval and sample on 0th iteration
-        // but also after the very last iteration. so we loop for step <= train_num_batches
-        // instead of just < train_num_batches (one extra due to <=), only to do
-        // the validation/sampling one last time, and then we break right here as we're done.
-        if (last_step) { break; }
+    for(int pass = 0; pass < numPasses; pass++){
+        GMP_LOG_DEBUG("Starting pass %d/%d\n"<<(pass + 1));
+        GmpProfiler::getInstance()->startRangeProfiling();
+        for (int step = 0; step <= train_num_batches; step++) {
+            curr_step = step;
+            int last_step = step == train_num_batches;
 
-        // do a training step
-        auto start = std::chrono::steady_clock::now();
-        dataloader_next_batch(&train_loader);
-        gpt2_forward(model, train_loader.inputs(), train_loader.targets(), B, T);
-        gpt2_zero_grad(model);
-        gpt2_backward(model);
-        gpt2_update(&model, learning_rate, 0.9f, 0.999f, 1e-8f, 0.0f, step+1);
-        cudaCheck(cudaDeviceSynchronize()); // finish all CUDA work to get correct precise timings
-        auto end = std::chrono::steady_clock::now();
-        double time_elapsed_s = std::chrono::duration<double>(end - start).count();
-        total_sum_iteration_time_s += time_elapsed_s;
-        printf("step %d/%d: train loss %f (%f ms)\n", step + 1, train_num_batches, model.mean_loss, time_elapsed_s * 1000);
-        logger_log_train(&logger, step, model.mean_loss);
+            // // once in a while estimate the validation loss
+            // if (step % val_loss_every == 0 || last_step) {
+            //     float val_loss = 0.0f;
+            //     dataloader_reset(&val_loader);
+            //     for (int i = 0; i < val_num_batches; i++) {
+            //         dataloader_next_batch(&val_loader);
+            //         gpt2_forward(model, val_loader.inputs(), val_loader.targets(), B, T);
+            //         val_loss += model.mean_loss;
+            //     }
+            //     val_loss /= val_num_batches;
+            //     printf("val loss %f\n", val_loss);
+            //     logger_log_val(&logger, step, val_loss);
+            // }
+
+            // // once in a while do model inference to print generated text
+            // if (step > 0 && step % sample_every == 0 || last_step) {
+            //     // fill up gen_tokens with the GPT2_EOT, which kicks off the generation
+            //     for(int i = 0; i < B * T; ++i) {
+            //         gen_tokens[i] = GPT2_EOT;
+            //     }
+            //     // now sample from the model autoregressively
+            //     printf("generating:\n---\n");
+            //     for (int t = 1; t < genT; t++) {
+            //         // note that inference is very wasteful here because for each token
+            //         // we re-calculate the forward pass for all of (B,T) positions from scratch
+            //         // but the inference here is just for sanity checking anyway
+            //         // and we can maybe optimize a bit more later, with careful tests
+            //         gpt2_forward(model, gen_tokens.get(), NULL, B, T);
+            //         // furthermore, below we're only using b=0 (i.e. the first row) of all B rows
+            //         // we're in principle running B "inference streams" in parallel here
+            //         // only using position 0 because it's a bit faster (copy less probs from GPU -> CPU)
+            //         // get the V-dimensional vector probs[0, t-1, :]
+            //         float* probs = model.acts.probs + (t-1) * model.config.vocab_size;
+            //         // move probs back to CPU and sample
+            //         thrust::copy_n(thrust::device_pointer_cast(probs), model.config.vocab_size, cpu_probs.begin());
+            //         float coin = random_f32(&rng_state);
+            //         int next_token = sample_mult(cpu_probs, model.config.vocab_size, coin);
+            //         gen_tokens[t] = next_token;
+            //         // print the generated token, either using the Tokenizer or a fallback
+            //         if (tokenizer.init_ok) {
+            //             const char* token_str = tokenizer_decode(&tokenizer, next_token);
+            //             safe_printf(token_str);
+            //         } else {
+            //             // fall back to printing the token id
+            //             printf("%d ", next_token);
+            //         }
+            //         fflush(stdout);
+            //     }
+            //     printf("\n---\n");
+            // }
+
+            // bit confusing: we want to make sure to eval and sample on 0th iteration
+            // but also after the very last iteration. so we loop for step <= train_num_batches
+            // instead of just < train_num_batches (one extra due to <=), only to do
+            // the validation/sampling one last time, and then we break right here as we're done.
+            if (last_step) { break; }
+
+            // do a training step
+            auto start = std::chrono::steady_clock::now();
+            dataloader_next_batch(&train_loader);
+            gpt2_forward(model, train_loader.inputs(), train_loader.targets(), B, T);
+            gpt2_zero_grad(model);
+            gpt2_backward(model);
+            gpt2_update(&model, learning_rate, 0.9f, 0.999f, 1e-8f, 0.0f, step+1);
+            cudaCheck(cudaDeviceSynchronize()); // finish all CUDA work to get correct precise timings
+            auto end = std::chrono::steady_clock::now();
+            double time_elapsed_s = std::chrono::duration<double>(end - start).count();
+            total_sum_iteration_time_s += time_elapsed_s;
+            printf("step %d/%d: train loss %f (%f ms)\n", step + 1, train_num_batches, model.mean_loss, time_elapsed_s * 1000);
+            logger_log_train(&logger, step, model.mean_loss);
+
+        }
+        NV::Cupti::Checkpoint::cuptiCheckpointRestore(&handle);
+        GmpProfiler::getInstance()->stopRangeProfiling();
     }
     // add a total average, for optimizations that are only mild improvements
     printf("total average iteration time: %f ms\n", total_sum_iteration_time_s / train_num_batches * 1000);
 
-    GmpProfiler::getInstance()->stopRangeProfiling();
     GmpProfiler::getInstance()->decodeCounterData();
     GmpProfiler::getInstance()->printProfilerRanges(GmpOutputKernelReduction::SUM);
     
@@ -2288,6 +2316,13 @@ int main(int argc, char *argv[]) {
     cublasCheck(cublasDestroy(cublas_handle));
     cublasCheck(cublasLtDestroy(cublaslt_handle));
     logger_free(&logger);
+
+    int dev = 0;
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, dev);
+
+    // clockRate is in kHz
+    printf("SM clock (spec): %f MHz\n", prop.clockRate / 1000.0);
 
     return 0;
 }
