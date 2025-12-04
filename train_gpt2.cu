@@ -2087,6 +2087,8 @@ int main(int argc, char *argv[]) {
     std::string outputPath = "";
     GmpOutputKernelReduction outputOption = GmpOutputKernelReduction::SUM;
     assert(argc >= 2);
+    int B = 4; // batch size
+    int T = 64; // sequence length max
     for(int i = 2; i < argc; i++)
     {
         if(strcmp(argv[i], "-o") == 0){
@@ -2107,6 +2109,16 @@ int main(int argc, char *argv[]) {
             outputOption = GmpOutputKernelReduction::SUM;
             printf("Setting output option to SUM\n");
         }
+        else if (strcmp(argv[i], "-b") == 0){
+            assert(i+1 < argc);
+            B=atoi(argv[i + 1]);
+            i++;
+        }
+        else if (strcmp(argv[i], "-t") == 0){
+            assert(i+1 < argc);
+            T=atoi(argv[i + 1]);
+            i++;
+        }
         else{
             printf("Adding metric: %s\n", argv[i]);
             GmpProfiler::getInstance()->addMetrics(argv[i]);
@@ -2116,8 +2128,6 @@ int main(int argc, char *argv[]) {
     // read in the (optional) command line arguments
     const char* input_dataset_prefix = "data/tiny_shakespeare"; // or e.g. data/TinyStories
     const char* output_log_file = NULL;
-    int B = 4; // batch size
-    int T = 64; // sequence length max
     float learning_rate = 1e-4f;
     int val_loss_every = 20; // every how many steps do we eval validation loss?
     int val_max_batches = 20; // how many batches max do we eval for validation loss?
@@ -2219,12 +2229,10 @@ int main(int argc, char *argv[]) {
     handle.ctx = cuContext;
 
     NV::Cupti::Checkpoint::cuptiCheckpointSave(&handle);
-    auto numPasses = GmpProfiler::getInstance()->getNumPasses();
 
-    for(int pass = 0; pass < numPasses; pass++){
-        GMP_LOG_DEBUG("Starting pass %d/%d\n"<<(pass + 1));
+    do{
         GmpProfiler::getInstance()->startRangeProfiling();
-        for (int step = 0; step <= train_num_batches; step++) {
+        for (int step = 0; step < train_num_batches; step++) {
             curr_step = step;
             int last_step = step == train_num_batches;
 
@@ -2298,16 +2306,16 @@ int main(int argc, char *argv[]) {
             total_sum_iteration_time_s += time_elapsed_s;
             printf("step %d/%d: train loss %f (%f ms)\n", step + 1, train_num_batches, model.mean_loss, time_elapsed_s * 1000);
             logger_log_train(&logger, step, model.mean_loss);
-
         }
         NV::Cupti::Checkpoint::cuptiCheckpointRestore(&handle);
         GmpProfiler::getInstance()->stopRangeProfiling();
-    }
+    } while(!GmpProfiler::getInstance()->hasSubmittedAllPasses());
     // add a total average, for optimizations that are only mild improvements
     printf("total average iteration time: %f ms\n", total_sum_iteration_time_s / train_num_batches * 1000);
 
     GmpProfiler::getInstance()->decodeCounterData();
-    GmpProfiler::getInstance()->printProfilerRanges(GmpOutputKernelReduction::SUM);
+    std::string configName=std::string("B=")+std::to_string(B)+std::string("T=")+std::to_string(T);
+    GmpProfiler::getInstance()->printProfilerRanges(configName, outputOption);
     
     // free
     dataloader_free(&train_loader);
