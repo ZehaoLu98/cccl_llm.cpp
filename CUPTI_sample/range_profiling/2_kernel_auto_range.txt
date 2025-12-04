@@ -1,0 +1,25 @@
+Starting Range Profiling
+Compute Capability of Device: 8.0
+Num of Passes: 1
+VectorLaunchWorkLoad with 50000 elements and 256 threads per block.
+Range Mode: auto
+Replay Mode: kernel
+Starting Pass: 0
+Host workload duration: 2.1943e+07 nanoseconds
+pass index: 0
+target nesting level: 1
+Total num of Ranges: 2
+
+Range Name: 0
+-----------------------------------------------------------------------------------
+dram__sectors_write.sum                                                16444.000
+dram__sectors_read.sum                                                    68.000
+-----------------------------------------------------------------------------------
+
+Range Name: 1
+-----------------------------------------------------------------------------------
+dram__sectors_write.sum                                                17060.000
+dram__sectors_read.sum                                                     8.000
+-----------------------------------------------------------------------------------
+
+Result verification passed.

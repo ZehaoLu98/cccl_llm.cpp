@@ -1,0 +1,6 @@
+Starting Range Profiling
+Compute Capability of Device: 8.0
+
+
+Error: range_profiling.h:140: Function cuptiProfilerHostConfigAddMetrics(&configAddMetricsParams) failed with error(1): CUPTI_ERROR_INVALID_PARAMETER.
+

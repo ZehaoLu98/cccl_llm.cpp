@@ -1,0 +1,19 @@
+Starting Range Profiling
+Compute Capability of Device: 8.0
+Num of Passes: 1
+VectorLaunchWorkLoad with 8000000 elements and 256 threads per block.
+Range Mode: user
+Replay Mode: user
+Starting Pass: 0
+Host workload duration: 290048 nanoseconds
+pass index: 0
+target nesting level: 1
+Error: Result verification failed.
+Total num of Ranges: 1
+
+Range Name: VectorAdd
+-----------------------------------------------------------------------------------
+dram__sectors_write.sum                                              2321664.000
+dram__sectors_read.sum                                               4000208.000
+-----------------------------------------------------------------------------------
+

@@ -1,0 +1,53 @@
+Starting Range Profiling
+Compute Capability of Device: 8.0
+Num of Passes: 8
+Range Mode: auto
+Replay Mode: kernel
+Starting Pass: 0
+Host workload duration: 2.42406e+08 nanoseconds
+pass index: 0
+target nesting level: 1
+Total num of Ranges: 1
+
+Range Name: 0
+-----------------------------------------------------------------------------------
+smsp__average_warps_issue_stalled_short_scoreboard_per_issue_active.ratio                         1.409
+smsp__average_warps_issue_stalled_wait_per_issue_active.ratio                         3.394
+dram__sectors_write.sum                                                 1744.000
+sm__pipe_fma_cycles_active.max                                           128.000
+l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum                         3126.000
+smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio                        13.880
+smsp__sass_inst_executed_op_global_st.sum                               1563.000
+smsp__average_warp_latency_per_inst_issued.ratio                          51.748
+lts__t_requests_srcunit_l1_op_write.sum                                    0.000
+smsp__sass_inst_executed_op_global_ld.sum                               3126.000
+smsp__inst_executed.sum                                                25038.000
+smsp__average_warps_issue_stalled_math_pipe_throttle_per_issue_active.ratio                         0.175
+smsp__sass_inst_executed_op_shared_st.sum                                  0.000
+gpu__time_duration.sum                                                  3840.000
+dram__throughput.avg.pct_of_peak_sustained_elapsed                         0.976
+sm__pipe_alu_cycles_active.max                                            96.000
+lts__t_requests_srcunit_l1_op_read.sum                                     0.000
+smsp__sass_inst_executed_op_shared_ld.sum                                  0.000
+sm__cycles_active.max                                                   1658.000
+l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum                          6250.000
+gpc__cycles_elapsed.max                                                 4991.000
+l1tex__t_requests_pipe_lsu_mem_global_op_st.sum                         1563.000
+lts__t_requests_srcunit_tex_op_read.sum                                 3126.000
+gpu__time_duration.max                                                  3840.000
+sm__pipe_shared_cycles_active.max                                         32.000
+sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_bypass.sum                         0.000
+sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_access.sum                         0.000
+sm__throughput.avg.pct_of_peak_sustained_elapsed                           1.995
+sm__sass_inst_executed_op_ldgsts_cache_access.sum                          0.000
+sm__sass_inst_executed_op_ldgsts_cache_bypass.sum                          0.000
+lts__t_requests_srcunit_tex_op_write.sum                                1563.000
+sm__pipe_tensor_cycles_active.max                                         32.000
+sm__sass_l1tex_t_requests_pipe_lsu_mem_global_op_ldgsts_cache_bypass.sum                         0.000
+l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum                         12500.000
+sm__sass_l1tex_t_requests_pipe_lsu_mem_global_op_ldgsts_cache_access.sum                         0.000
+gpc__cycles_elapsed.avg.per_second                                1296242559.524
+dram__sectors_read.sum                                                    60.000
+-----------------------------------------------------------------------------------
+
+Result verification passed.
