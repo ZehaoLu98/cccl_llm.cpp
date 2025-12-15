@@ -2304,9 +2304,9 @@ int main(int argc, char *argv[]) {
             auto start = std::chrono::steady_clock::now();
             dataloader_next_batch(&train_loader);
             gpt2_forward(model, train_loader.inputs(), train_loader.targets(), B, T);
-            gpt2_zero_grad(model);
-            gpt2_backward(model);
-            gpt2_update(&model, learning_rate, 0.9f, 0.999f, 1e-8f, 0.0f, step+1);
+            // gpt2_zero_grad(model);
+            // gpt2_backward(model);
+            // gpt2_update(&model, learning_rate, 0.9f, 0.999f, 1e-8f, 0.0f, step+1);
             cudaCheck(cudaDeviceSynchronize()); // finish all CUDA work to get correct precise timings
             auto end = std::chrono::steady_clock::now();
             double time_elapsed_s = std::chrono::duration<double>(end - start).count();
@@ -2314,6 +2314,7 @@ int main(int argc, char *argv[]) {
             printf("step %d/%d: train loss %f (%f ms)\n", step + 1, train_num_batches, model.mean_loss, time_elapsed_s * 1000);
             logger_log_train(&logger, step, model.mean_loss);
         }
+        
         NV::Cupti::Checkpoint::cuptiCheckpointRestore(&handle);
         GmpProfiler::getInstance()->stopRangeProfiling();
     } while(!GmpProfiler::getInstance()->hasSubmittedAllPasses());
