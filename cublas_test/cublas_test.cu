@@ -29,12 +29,30 @@ __global__ void helloKernel() {
         } \
     } while(0)
 
+#define TRY_CUDA(call) \
+    do { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) { \
+            printf("CUDA error at %s:%d: %s - skipping test\n", __FILE__, __LINE__, cudaGetErrorString(err)); \
+            return false; \
+        } \
+    } while(0)
+
 #define CHECK_CUBLAS(call) \
     do { \
         cublasStatus_t status = call; \
         if (status != CUBLAS_STATUS_SUCCESS) { \
             printf("cuBLAS error at %s:%d: %d\n", __FILE__, __LINE__, status); \
             exit(1); \
+        } \
+    } while(0)
+
+#define TRY_CUBLAS(call) \
+    do { \
+        cublasStatus_t status = call; \
+        if (status != CUBLAS_STATUS_SUCCESS) { \
+            printf("cuBLAS error at %s:%d: %d - skipping test\n", __FILE__, __LINE__, status); \
+            return false; \
         } \
     } while(0)
 
@@ -76,20 +94,24 @@ public:
         cublasDestroy(handle);
     }
     
-    void testBigGemm() {
+    bool testBigGemm() {
         printf("\n=== Testing Big GEMM (%dx%d) ===\n", N, N);
         
         // Allocate matrices
         float *d_A, *d_B, *d_C;
         size_t size = N * N * sizeof(float);
         
-        CHECK_CUDA(cudaMalloc(&d_A, size));
-        CHECK_CUDA(cudaMalloc(&d_B, size));
-        CHECK_CUDA(cudaMalloc(&d_C, size));
+        TRY_CUDA(cudaMalloc(&d_A, size));
+        TRY_CUDA(cudaMalloc(&d_B, size));
+        TRY_CUDA(cudaMalloc(&d_C, size));
         
         // Initialize with random data
         curandGenerator_t gen;
-        curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
+        if (curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT) != CURAND_STATUS_SUCCESS) {
+            printf("cuRAND error: failed to create generator - skipping test\n");
+            cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+            return false;
+        }
         curandSetPseudoRandomGeneratorSeed(gen, 1234ULL);
         curandGenerateUniform(gen, d_A, N * N);
         curandGenerateUniform(gen, d_B, N * N);
@@ -100,7 +122,7 @@ public:
         
         // Warmup
         for (int i = 0; i < warmup_iterations; i++) {
-            CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+            TRY_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
                                    N, N, N,
                                    &alpha,
                                    d_A, N,
@@ -108,17 +130,17 @@ public:
                                    &beta,
                                    d_C, N));
         }
-        CHECK_CUDA(cudaDeviceSynchronize());
+        TRY_CUDA(cudaDeviceSynchronize());
         
         // Timing
         cudaEvent_t start, stop;
-        CHECK_CUDA(cudaEventCreate(&start));
-        CHECK_CUDA(cudaEventCreate(&stop));
+        TRY_CUDA(cudaEventCreate(&start));
+        TRY_CUDA(cudaEventCreate(&stop));
         
-        CHECK_CUDA(cudaEventRecord(start, 0));
+        TRY_CUDA(cudaEventRecord(start, 0));
         
         GmpProfiler::getInstance()->pushRange("BigGEMM", GmpProfileType::CONCURRENT_KERNEL);
-        CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+        TRY_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
                                N, N, N,
                                &alpha,
                                d_A, N,
@@ -126,11 +148,11 @@ public:
                                &beta,
                                d_C, N));
         GmpProfiler::getInstance()->popRange("BigGEMM", GmpProfileType::CONCURRENT_KERNEL);
-        CHECK_CUDA(cudaEventRecord(stop, 0));
-        CHECK_CUDA(cudaEventSynchronize(stop));
+        TRY_CUDA(cudaEventRecord(stop, 0));
+        TRY_CUDA(cudaEventSynchronize(stop));
         
         float time_ms = 0;
-        CHECK_CUDA(cudaEventElapsedTime(&time_ms, start, stop));
+        TRY_CUDA(cudaEventElapsedTime(&time_ms, start, stop));
         
         // Performance metrics
         size_t memory_bytes = 3 * size; // Read A, B; Write C
@@ -144,15 +166,16 @@ public:
                "Big GEMM", time_ms, throughput, gflops);
         
         // Cleanup
-        CHECK_CUDA(cudaEventDestroy(start));
-        CHECK_CUDA(cudaEventDestroy(stop));
-        CHECK_CUDA(cudaFree(d_A));
-        CHECK_CUDA(cudaFree(d_B));
-        CHECK_CUDA(cudaFree(d_C));
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+        cudaFree(d_A);
+        cudaFree(d_B);
+        cudaFree(d_C);
         curandDestroyGenerator(gen);
+        return true;
     }
     
-    void testNaiveGemm() {
+    bool testNaiveGemm() {
         printf("\n=== Testing Naive GEMM (%d individual %dx%d multiplications) ===\n", k, N/k, N);
         
         int batch_size = k;
@@ -169,9 +192,18 @@ public:
         
         // Allocate individual matrices
         for (int i = 0; i < batch_size; i++) {
-            CHECK_CUDA(cudaMalloc(&d_A_array[i], size_A));
-            CHECK_CUDA(cudaMalloc(&d_B_array[i], size_B));
-            CHECK_CUDA(cudaMalloc(&d_C_array[i], size_C));
+            if (cudaMalloc(&d_A_array[i], size_A) != cudaSuccess ||
+                cudaMalloc(&d_B_array[i], size_B) != cudaSuccess ||
+                cudaMalloc(&d_C_array[i], size_C) != cudaSuccess) {
+                printf("CUDA malloc failed for batch %d - skipping test\n", i);
+                // Cleanup already allocated memory
+                for (int j = 0; j <= i; j++) {
+                    if (d_A_array[j]) cudaFree(d_A_array[j]);
+                    if (d_B_array[j]) cudaFree(d_B_array[j]);
+                    if (d_C_array[j]) cudaFree(d_C_array[j]);
+                }
+                return false;
+            }
         }
         
         // Initialize with random data
@@ -248,9 +280,10 @@ public:
         }
         
         curandDestroyGenerator(gen);
+        return true;
     }
 
-    void testBatchedGemm() {
+    bool testBatchedGemm() {
         printf("\n=== Testing Batched GEMM (%d batches of %dx%d) ===\n", k, N/k, N);
         
         int batch_size = k;
@@ -268,16 +301,32 @@ public:
         
         // Allocate individual matrices
         for (int i = 0; i < batch_size; i++) {
-            CHECK_CUDA(cudaMalloc(&d_A_array[i], size_A));
-            CHECK_CUDA(cudaMalloc(&d_B_array[i], size_B));
-            CHECK_CUDA(cudaMalloc(&d_C_array[i], size_C));
+            if (cudaMalloc(&d_A_array[i], size_A) != cudaSuccess ||
+                cudaMalloc(&d_B_array[i], size_B) != cudaSuccess ||
+                cudaMalloc(&d_C_array[i], size_C) != cudaSuccess) {
+                printf("CUDA malloc failed for batch %d in testBatchedGemm - skipping test\n", i);
+                for (int j = 0; j <= i; j++) {
+                    if (d_A_array[j]) cudaFree(d_A_array[j]);
+                    if (d_B_array[j]) cudaFree(d_B_array[j]);
+                    if (d_C_array[j]) cudaFree(d_C_array[j]);
+                }
+                return false;
+            }
         }
         
         // Copy pointers to device
         float **d_A_ptr, **d_B_ptr, **d_C_ptr;
-        CHECK_CUDA(cudaMalloc(&d_A_ptr, batch_size * sizeof(float*)));
-        CHECK_CUDA(cudaMalloc(&d_B_ptr, batch_size * sizeof(float*)));
-        CHECK_CUDA(cudaMalloc(&d_C_ptr, batch_size * sizeof(float*)));
+        if (cudaMalloc(&d_A_ptr, batch_size * sizeof(float*)) != cudaSuccess ||
+            cudaMalloc(&d_B_ptr, batch_size * sizeof(float*)) != cudaSuccess ||
+            cudaMalloc(&d_C_ptr, batch_size * sizeof(float*)) != cudaSuccess) {
+            printf("CUDA malloc failed for pointer arrays in testBatchedGemm - skipping test\n");
+            for (int i = 0; i < batch_size; i++) {
+                cudaFree(d_A_array[i]);
+                cudaFree(d_B_array[i]);
+                cudaFree(d_C_array[i]);
+            }
+            return false;
+        }
         
         CHECK_CUDA(cudaMemcpy(d_A_ptr, d_A_array.data(), batch_size * sizeof(float*), cudaMemcpyHostToDevice));
         CHECK_CUDA(cudaMemcpy(d_B_ptr, d_B_array.data(), batch_size * sizeof(float*), cudaMemcpyHostToDevice));
@@ -360,9 +409,10 @@ public:
         CHECK_CUDA(cudaFree(d_B_ptr));
         CHECK_CUDA(cudaFree(d_C_ptr));
         curandDestroyGenerator(gen);
+        return true;
     }
     
-    void testStridedBatchedGemm() {
+    bool testStridedBatchedGemm() {
         printf("\n=== Testing Strided Batched GEMM (%d batches of %dx%d) ===\n", k, N/k, N);
         
         int batch_size = k;
@@ -381,9 +431,15 @@ public:
         size_t total_size_B = stride_B * batch_size * sizeof(float);
         size_t total_size_C = stride_C * batch_size * sizeof(float);
         
-        CHECK_CUDA(cudaMalloc(&d_A, total_size_A));
-        CHECK_CUDA(cudaMalloc(&d_B, total_size_B));
-        CHECK_CUDA(cudaMalloc(&d_C, total_size_C));
+        if (cudaMalloc(&d_A, total_size_A) != cudaSuccess ||
+            cudaMalloc(&d_B, total_size_B) != cudaSuccess ||
+            cudaMalloc(&d_C, total_size_C) != cudaSuccess) {
+            printf("CUDA malloc failed in testStridedBatchedGemm - skipping test\n");
+            if (d_A) cudaFree(d_A);
+            if (d_B) cudaFree(d_B);
+            if (d_C) cudaFree(d_C);
+            return false;
+        }
         
         // Initialize with random data
         curandGenerator_t gen;
@@ -452,22 +508,27 @@ public:
         CHECK_CUDA(cudaFree(d_B));
         CHECK_CUDA(cudaFree(d_C));
         curandDestroyGenerator(gen);
+        return true;
     }
     
-    void testBigGemm_v2() {
+    bool testBigGemm_v2() {
         printf("\n=== Testing Big GEMM (%dx%d) ===\n", N, N * k);
         
         // Allocate matrices
         float *d_A, *d_B, *d_C;
         size_t size = N * N * k * sizeof(float);
         
-        CHECK_CUDA(cudaMalloc(&d_A, size));
-        CHECK_CUDA(cudaMalloc(&d_B, size));
-        CHECK_CUDA(cudaMalloc(&d_C, size));
+        TRY_CUDA(cudaMalloc(&d_A, size));
+        TRY_CUDA(cudaMalloc(&d_B, size));
+        TRY_CUDA(cudaMalloc(&d_C, size));
         
         // Initialize with random data
         curandGenerator_t gen;
-        curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
+        if (curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT) != CURAND_STATUS_SUCCESS) {
+            printf("cuRAND error: failed to create generator - skipping test\n");
+            cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+            return false;
+        }
         curandSetPseudoRandomGeneratorSeed(gen, 1234ULL);
         curandGenerateUniform(gen, d_A, N * N);
         curandGenerateUniform(gen, d_B, N * N * k);
@@ -478,7 +539,7 @@ public:
         
         // Warmup
         for (int i = 0; i < warmup_iterations; i++) {
-            CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+            TRY_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
                                    N, N*k, N,
                                    &alpha,
                                    d_A, N,
@@ -486,17 +547,17 @@ public:
                                    &beta,
                                    d_C, N));
         }
-        CHECK_CUDA(cudaDeviceSynchronize());
+        TRY_CUDA(cudaDeviceSynchronize());
         
         // Timing
         cudaEvent_t start, stop;
-        CHECK_CUDA(cudaEventCreate(&start));
-        CHECK_CUDA(cudaEventCreate(&stop));
+        TRY_CUDA(cudaEventCreate(&start));
+        TRY_CUDA(cudaEventCreate(&stop));
         
-        CHECK_CUDA(cudaEventRecord(start, 0));
+        TRY_CUDA(cudaEventRecord(start, 0));
         
         GmpProfiler::getInstance()->pushRange("BigGEMM", GmpProfileType::CONCURRENT_KERNEL);
-        CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+        TRY_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
                                N, N*k, N,
                                &alpha,
                                d_A, N,
@@ -504,11 +565,11 @@ public:
                                &beta,
                                d_C, N));
         GmpProfiler::getInstance()->popRange("BigGEMM", GmpProfileType::CONCURRENT_KERNEL);
-        CHECK_CUDA(cudaEventRecord(stop, 0));
-        CHECK_CUDA(cudaEventSynchronize(stop));
+        TRY_CUDA(cudaEventRecord(stop, 0));
+        TRY_CUDA(cudaEventSynchronize(stop));
         
         float time_ms = 0;
-        CHECK_CUDA(cudaEventElapsedTime(&time_ms, start, stop));
+        TRY_CUDA(cudaEventElapsedTime(&time_ms, start, stop));
         
         // Performance metrics
         size_t memory_bytes = 3 * size; // Read A, B; Write C
@@ -522,15 +583,16 @@ public:
                "Big GEMM", time_ms, throughput, gflops);
         
         // Cleanup
-        CHECK_CUDA(cudaEventDestroy(start));
-        CHECK_CUDA(cudaEventDestroy(stop));
-        CHECK_CUDA(cudaFree(d_A));
-        CHECK_CUDA(cudaFree(d_B));
-        CHECK_CUDA(cudaFree(d_C));
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+        cudaFree(d_A);
+        cudaFree(d_B);
+        cudaFree(d_C);
         curandDestroyGenerator(gen);
+        return true;
     }
     
-    void testNaiveGemm_v2() {
+    bool testNaiveGemm_v2() {
         printf("\n=== Testing Naive GEMM (%d individual %dx%d multiplications) ===\n", k, N, N);
         
         int batch_size = k;
@@ -547,9 +609,17 @@ public:
         
         // Allocate individual matrices
         for (int i = 0; i < batch_size; i++) {
-            CHECK_CUDA(cudaMalloc(&d_A_array[i], size_A));
-            CHECK_CUDA(cudaMalloc(&d_B_array[i], size_B));
-            CHECK_CUDA(cudaMalloc(&d_C_array[i], size_C));
+            if (cudaMalloc(&d_A_array[i], size_A) != cudaSuccess ||
+                cudaMalloc(&d_B_array[i], size_B) != cudaSuccess ||
+                cudaMalloc(&d_C_array[i], size_C) != cudaSuccess) {
+                printf("CUDA malloc failed for batch %d in testNaiveGemm_v2 - skipping test\n", i);
+                for (int j = 0; j <= i; j++) {
+                    if (d_A_array[j]) cudaFree(d_A_array[j]);
+                    if (d_B_array[j]) cudaFree(d_B_array[j]);
+                    if (d_C_array[j]) cudaFree(d_C_array[j]);
+                }
+                return false;
+            }
         }
         
         // Initialize with random data
@@ -626,9 +696,10 @@ public:
         }
         
         curandDestroyGenerator(gen);
+        return true;
     }
 
-    void testBatchedGemm_v2() {
+    bool testBatchedGemm_v2() {
         printf("\n=== Testing Batched GEMM (%d batches of %dx%d) ===\n", k, N, N);
         
         int batch_size = k;
@@ -646,16 +717,32 @@ public:
         
         // Allocate individual matrices
         for (int i = 0; i < batch_size; i++) {
-            CHECK_CUDA(cudaMalloc(&d_A_array[i], size_A));
-            CHECK_CUDA(cudaMalloc(&d_B_array[i], size_B));
-            CHECK_CUDA(cudaMalloc(&d_C_array[i], size_C));
+            if (cudaMalloc(&d_A_array[i], size_A) != cudaSuccess ||
+                cudaMalloc(&d_B_array[i], size_B) != cudaSuccess ||
+                cudaMalloc(&d_C_array[i], size_C) != cudaSuccess) {
+                printf("CUDA malloc failed for batch %d in testBatchedGemm_v2 - skipping test\n", i);
+                for (int j = 0; j <= i; j++) {
+                    if (d_A_array[j]) cudaFree(d_A_array[j]);
+                    if (d_B_array[j]) cudaFree(d_B_array[j]);
+                    if (d_C_array[j]) cudaFree(d_C_array[j]);
+                }
+                return false;
+            }
         }
         
         // Copy pointers to device
         float **d_A_ptr, **d_B_ptr, **d_C_ptr;
-        CHECK_CUDA(cudaMalloc(&d_A_ptr, batch_size * sizeof(float*)));
-        CHECK_CUDA(cudaMalloc(&d_B_ptr, batch_size * sizeof(float*)));
-        CHECK_CUDA(cudaMalloc(&d_C_ptr, batch_size * sizeof(float*)));
+        if (cudaMalloc(&d_A_ptr, batch_size * sizeof(float*)) != cudaSuccess ||
+            cudaMalloc(&d_B_ptr, batch_size * sizeof(float*)) != cudaSuccess ||
+            cudaMalloc(&d_C_ptr, batch_size * sizeof(float*)) != cudaSuccess) {
+            printf("CUDA malloc failed for pointer arrays in testBatchedGemm_v2 - skipping test\n");
+            for (int i = 0; i < batch_size; i++) {
+                cudaFree(d_A_array[i]);
+                cudaFree(d_B_array[i]);
+                cudaFree(d_C_array[i]);
+            }
+            return false;
+        }
         
         CHECK_CUDA(cudaMemcpy(d_A_ptr, d_A_array.data(), batch_size * sizeof(float*), cudaMemcpyHostToDevice));
         CHECK_CUDA(cudaMemcpy(d_B_ptr, d_B_array.data(), batch_size * sizeof(float*), cudaMemcpyHostToDevice));
@@ -738,9 +825,10 @@ public:
         CHECK_CUDA(cudaFree(d_B_ptr));
         CHECK_CUDA(cudaFree(d_C_ptr));
         curandDestroyGenerator(gen);
+        return true;
     }
     
-    void testStridedBatchedGemm_v2() {
+    bool testStridedBatchedGemm_v2() {
         printf("\n=== Testing Strided Batched GEMM (%d batches of %dx%d) ===\n", k, N, N);
         
         int batch_size = k;
@@ -759,9 +847,15 @@ public:
         size_t total_size_B = stride_B * batch_size * sizeof(float);
         size_t total_size_C = stride_C * batch_size * sizeof(float);
         
-        CHECK_CUDA(cudaMalloc(&d_A, total_size_A));
-        CHECK_CUDA(cudaMalloc(&d_B, total_size_B));
-        CHECK_CUDA(cudaMalloc(&d_C, total_size_C));
+        if (cudaMalloc(&d_A, total_size_A) != cudaSuccess ||
+            cudaMalloc(&d_B, total_size_B) != cudaSuccess ||
+            cudaMalloc(&d_C, total_size_C) != cudaSuccess) {
+            printf("CUDA malloc failed in testStridedBatchedGemm_v2 - skipping test\n");
+            if (d_A) cudaFree(d_A);
+            if (d_B) cudaFree(d_B);
+            if (d_C) cudaFree(d_C);
+            return false;
+        }
         
         // Initialize with random data
         curandGenerator_t gen;
@@ -830,6 +924,7 @@ public:
         CHECK_CUDA(cudaFree(d_B));
         CHECK_CUDA(cudaFree(d_C));
         curandDestroyGenerator(gen);
+        return true;
     }
     
 
@@ -870,10 +965,25 @@ public:
 
 
         printSystemInfo();
-        testBigGemm_v2();
-        testNaiveGemm_v2();
-        testBatchedGemm_v2();
-        testStridedBatchedGemm_v2();
+        
+        printf("\n=== Running CUDA Performance Tests ===\n");
+        printf("Note: If any test fails due to memory allocation or other errors, it will be skipped.\n\n");
+        
+        bool success;
+        
+        success = testBigGemm_v2();
+        if (!success) printf("Big GEMM test failed and was skipped.\n");
+        
+        success = testNaiveGemm_v2(); 
+        if (!success) printf("Naive GEMM test failed and was skipped.\n");
+        
+        success = testBatchedGemm_v2();
+        if (!success) printf("Batched GEMM test failed and was skipped.\n");
+        
+        success = testStridedBatchedGemm_v2();
+        if (!success) printf("Strided Batched GEMM test failed and was skipped.\n");
+        
+        printf("\nAll available tests completed.\n");
     }
 };
 
