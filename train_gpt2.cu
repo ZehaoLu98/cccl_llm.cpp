@@ -1323,7 +1323,7 @@ struct GPT2 {
 };
 
 
-void gpt2_build_from_checkpoint(GPT2 &model, const char* checkpoint_path) {
+void gpt2_build_from_checkpoint(GPT2 &model, const char* checkpoint_path, int nh_override = -1) {
 
     // read in model from a checkpoint file
     FILE *model_file = fopenCheck(checkpoint_path, "rb");
@@ -1339,6 +1339,13 @@ void gpt2_build_from_checkpoint(GPT2 &model, const char* checkpoint_path) {
     model.config.num_layers = L = model_header[4];
     model.config.num_heads = NH = model_header[5];
     model.config.channels = C = model_header[6];
+    
+    // override number of heads if specified
+    if (nh_override > 0) {
+        printf("Overriding num_heads from %d to %d\n", NH, nh_override);
+        model.config.num_heads = NH = nh_override;
+    }
+    
     printf("[GPT-2]\n");
     printf("max_seq_len: %d\n", maxT);
     printf("vocab_size: %d\n", V);
@@ -2079,6 +2086,7 @@ void error_usage() {
     fprintf(stderr, "  -o <string> output log file (default = NULL)\n");
     fprintf(stderr, "  -b <int>    batch size B (default = 4)\n");
     fprintf(stderr, "  -t <int>    sequence length T (default = 1024)\n");
+    fprintf(stderr, "  -nh <int>   number of attention heads (default = model default)\n");
     fprintf(stderr, "  -l <float>  learning rate (default = 1e-4f)\n");
     fprintf(stderr, "  -v <int>    val_loss_every, how often we evaluate val loss (default = 20)\n");
     fprintf(stderr, "  -m <int>    val_max_batches, up to how many val batches to estimate val loss? (default = 20)\n");
@@ -2096,6 +2104,7 @@ int main(int argc, char *argv[]) {
     assert(argc >= 2);
     int B = 4; // batch size
     int T = 64; // sequence length max
+    int nh = -1; // number of heads override (-1 means use model default)
     for(int i = 2; i < argc; i++)
     {
         if(strcmp(argv[i], "-o") == 0){
@@ -2124,6 +2133,12 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "-t") == 0){
             assert(i+1 < argc);
             T=atoi(argv[i + 1]);
+            i++;
+        }
+        else if (strcmp(argv[i], "-nh") == 0){
+            assert(i+1 < argc);
+            nh=atoi(argv[i + 1]);
+            printf("Setting number of heads override to: %d\n", nh);
             i++;
         }
         else{
@@ -2160,6 +2175,7 @@ int main(int argc, char *argv[]) {
     printf("output log file: %s\n", output_log_file == NULL ? "NULL" : output_log_file);
     printf("batch size B: %d\n", B);
     printf("sequence length T: %d\n", T);
+    printf("num_heads override nh: %d\n", nh);
     printf("learning rate: %f\n", learning_rate);
     printf("val_loss_every: %d\n", val_loss_every);
     printf("val_max_batches: %d\n", val_max_batches);
@@ -2189,7 +2205,7 @@ int main(int argc, char *argv[]) {
 
     // build the GPT-2 model from a checkpoint
     GPT2 model;
-    gpt2_build_from_checkpoint(model, "gpt2_124M.bin");
+    gpt2_build_from_checkpoint(model, "gpt2_124M.bin", nh);
 
     // build the DataLoaders from tokens files. for now use tiny_shakespeare if available, else tiny_stories
     char train_tokens_filename[128];
