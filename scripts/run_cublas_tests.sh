@@ -10,33 +10,68 @@
 
 # Define commands to run in an array
 declare -a commands=(
-    # B=8
+    # # B=8
+    # "./cublas_test 1024 8"
+    # "./cublas_test 2048 8"
+    # "./cublas_test 4096 8"
+    # "./cublas_test 8192 8"
+    # "./cublas_test 16384 8"
+
+    # # B=16
+    # "./cublas_test 1024 16"
+    # "./cublas_test 2048 16"
+    # "./cublas_test 4096 16"
+    # "./cublas_test 8192 16"
+    # "./cublas_test 16384 16"
+
+    # # B=32
+    # "./cublas_test 1024 32"
+    # "./cublas_test 2048 32"
+    # "./cublas_test 4096 32"
+    # "./cublas_test 8192 32"
+    # "./cublas_test 16384 32"
+
+    # # B=64
+    # "./cublas_test 1024 64"
+    # "./cublas_test 2048 64"
+    # "./cublas_test 4096 64"
+    # "./cublas_test 8192 64"
+    # "./cublas_test 16384 64"
+
+
+    "./cublas_test 1024 2"
+    "./cublas_test 1024 4"
     "./cublas_test 1024 8"
-    "./cublas_test 2048 8"
-    "./cublas_test 4096 8"
-    "./cublas_test 8192 8"
-    "./cublas_test 16384 8"
-
-    # B=16
     "./cublas_test 1024 16"
-    "./cublas_test 2048 16"
-    "./cublas_test 4096 16"
-    "./cublas_test 8192 16"
-    "./cublas_test 16384 16"
-
-    # B=32
     "./cublas_test 1024 32"
-    "./cublas_test 2048 32"
-    "./cublas_test 4096 32"
-    "./cublas_test 8192 32"
-    "./cublas_test 16384 32"
-
-    # B=64
     "./cublas_test 1024 64"
-    "./cublas_test 2048 64"
+    "./cublas_test 1024 128"
+    "./cublas_test 1024 256"
+    "./cublas_test 1024 512"
+
+    "./cublas_test 2560 2"
+    "./cublas_test 2560 4"
+    "./cublas_test 2560 8"
+    "./cublas_test 2560 16"
+    "./cublas_test 2560 32"
+    "./cublas_test 2560 64"
+    "./cublas_test 2560 128"
+    "./cublas_test 2560 256"
+    "./cublas_test 2560 512"
+
+
+    "./cublas_test 4096 2"
+    "./cublas_test 4096 4"
+    "./cublas_test 4096 8"
+    "./cublas_test 4096 16"
+    "./cublas_test 4096 32"
     "./cublas_test 4096 64"
-    "./cublas_test 8192 64"
-    "./cublas_test 16384 64"
+    "./cublas_test 4096 128"
+    "./cublas_test 4096 256"
+    "./cublas_test 4096 512"
+    "./cublas_test 4096 1024"
+    "./cublas_test 4096 2048"
+
 )
 
 # Check if at least one command is provided
