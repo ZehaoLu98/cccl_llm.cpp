@@ -205,6 +205,17 @@ declare -a commands=(
     "./train_gpt2cu 2 -b 768 -t 1408"
     "./train_gpt2cu 2 -b 768 -t 1472"
     "./train_gpt2cu 2 -b 768 -t 1536"
+
+    "./train_gpt2cu 2 -b 4 -t 64 -nh 4"
+    "./train_gpt2cu 2 -b 4 -t 64 -nh 8"
+    "./train_gpt2cu 2 -b 4 -t 64 -nh 16"
+    "./train_gpt2cu 2 -b 4 -t 64 -nh 32"
+
+    "./train_gpt2cu 2 -b 64 -t 256 -nh 4"
+    "./train_gpt2cu 2 -b 64 -t 256 -nh 8"
+    "./train_gpt2cu 2 -b 64 -t 256 -nh 16"
+    "./train_gpt2cu 2 -b 64 -t 256 -nh 32"
+
     # Add more commands below as needed
 )
 
