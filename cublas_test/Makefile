@@ -13,7 +13,7 @@ CXXFLAGS = -O3
 LDFLAGS = -lcublas -lcurand -lcupti -lgmp -lcheckpoint -L../GMP/lib -lcuda -lcudart
 
 # Include directories
-INCLUDES = -I../GMP/include
+INCLUDES = -I../GMP/include -I../NVTX/c/include
 
 # Target executable
 TARGET = cublas_test
