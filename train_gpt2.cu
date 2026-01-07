@@ -1838,10 +1838,6 @@ void dataloader_init(DataLoader *loader, const char* filename, int B, int T) {
     fseek(loader->tokens_file, 0, SEEK_END);
     loader->file_size = ftell(loader->tokens_file);
     fseek(loader->tokens_file, 0, SEEK_SET);
-    if (loader->file_size < (B * T + 1) * sizeof(int)) {
-        printf("Error: file size is too small for the batch size and sequence length\n");
-        exit(EXIT_FAILURE);
-    }
     loader->current_position = 0; // start at the beginning
 
     // allocate space for B*T + 1 integers to store the inputs and targets
@@ -1858,15 +1854,32 @@ void dataloader_reset(DataLoader *loader) {
 void dataloader_next_batch(DataLoader *loader) {
     int B = loader->B;
     int T = loader->T;
-    // if we are at the end of the file, loop back to the beginning
-    if (loader->current_position + (B*T+1) * sizeof(int) > loader->file_size) {
-        loader->current_position = 0;
+    long batch_size = (B*T+1) * sizeof(int);
+    
+    // wrap around if we're at the end of the file
+    if (loader->current_position + batch_size > loader->file_size) {
+        // read data in two parts: end of file + beginning of file
+        long first_part_size = loader->file_size - loader->current_position;
+        long second_part_size = batch_size - first_part_size;
+        
+        // read the first part from current position to end of file
+        fseek(loader->tokens_file, loader->current_position, SEEK_SET);
+        fread(thrust::raw_pointer_cast(loader->batch.data()), 1, first_part_size, loader->tokens_file);
+        
+        // read the second part from the beginning of file
+        fseek(loader->tokens_file, 0, SEEK_SET);
+        fread(thrust::raw_pointer_cast(loader->batch.data()) + first_part_size, 1, second_part_size, loader->tokens_file);
+        
+        // update position (wrapping around)
+        loader->current_position = second_part_size;
+    } else {
+        // normal read without wrapping
+        fseek(loader->tokens_file, loader->current_position, SEEK_SET);
+        fread(thrust::raw_pointer_cast(loader->batch.data()), sizeof(int), B*T+1, loader->tokens_file);
+        
+        // advance the current position by B*T integers
+        loader->current_position += B*T * sizeof(int);
     }
-    // read the B*T+1 integers from the file into batch
-    fseek(loader->tokens_file, loader->current_position, SEEK_SET);
-    fread(thrust::raw_pointer_cast(loader->batch.data()), sizeof(int), B*T+1, loader->tokens_file);
-    // advance the current position by B*T integers
-    loader->current_position += B*T * sizeof(int);
 }
 
 void dataloader_free(DataLoader *loader) {
@@ -2278,7 +2291,7 @@ int main(int argc, char *argv[]) {
     printf("total average iteration time: %f ms\n", total_sum_iteration_time_s / train_num_batches * 1000);
 
     GmpProfiler::getInstance()->decodeCounterData();
-    std::string configName=std::string("B=")+std::to_string(B)+std::string("T=")+std::to_string(T);
+    std::string configName=std::string("B=")+std::to_string(B)+std::string("T=")+std::to_string(T)+std::string("NH=")+std::to_string(model.config.num_heads);
     GmpProfiler::getInstance()->printProfilerRanges(configName, outputOption);
     
     // free
