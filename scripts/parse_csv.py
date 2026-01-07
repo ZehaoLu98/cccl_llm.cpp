@@ -16,24 +16,28 @@ import re
 from collections import defaultdict, OrderedDict
 
 def parse_config_name(config_str):
-    """Extract B and T values from config name like 'B=4T=64'."""
-    match = re.match(r'B=(\d+)T=(\d+)', config_str)
+    """Extract B, T, and NH values from config name like 'B=4T=64NH=12'. Falls back to NH=12 if not specified."""
+    match = re.match(r'B=(\d+)T=(\d+)(?:NH=(\d+))?', config_str)
     if match:
-        return int(match.group(1)), int(match.group(2))
-    return None, None
+        b = int(match.group(1))
+        t = int(match.group(2))
+        nh = int(match.group(3)) if match.group(3) else 12  # Default to 12 if not found
+        return b, t, nh
+    return None, None, None
 
 def parse_log_file(log_file):
     """
     Parse the log file to extract wall clock time, kernel count, and grid/block sizes.
     Returns:
-    - timing_data: dict {(range_name, B, T): {'wall_clock_time': value, 'kernel_count': value}}
-    - kernel_configs: dict {(range_name, B, T): [list of (grid, block) tuples]}
+    - timing_data: dict {(range_name, B, T, NH): {'wall_clock_time': value, 'kernel_count': value}}
+    - kernel_configs: dict {(range_name, B, T, NH): [list of (grid, block) tuples]}
     """
     timing_data = {}
     kernel_configs = defaultdict(list)
     
     current_b = None
     current_t = None
+    current_nh = None
     current_range = None
     
     with open(log_file, 'r') as f:
@@ -47,14 +51,22 @@ def parse_log_file(log_file):
                 current_t = int(exec_match.group(2))
                 continue
             
+            # Extract NH (num_heads) from log output
+            nh_match = re.match(r'num_heads:\s+(\d+)', line)
+            if nh_match:
+                current_nh = int(nh_match.group(1))
+                continue
+            
             # Extract wall clock time for ranges
             timed_match = re.match(r'\[TIMED\]\s+(\S+)\s+took\s+(\d+)\s+µs', line)
             if timed_match and current_b is not None and current_t is not None:
                 range_name = timed_match.group(1)
                 wall_clock_time = int(timed_match.group(2))
-                if (range_name, current_b, current_t) not in timing_data:
-                    timing_data[(range_name, current_b, current_t)] = {}
-                timing_data[(range_name, current_b, current_t)]['wall_clock_time'] = wall_clock_time
+                # Default to NH=12 if not found yet
+                nh = current_nh if current_nh is not None else 12
+                if (range_name, current_b, current_t, nh) not in timing_data:
+                    timing_data[(range_name, current_b, current_t, nh)] = {}
+                timing_data[(range_name, current_b, current_t, nh)]['wall_clock_time'] = wall_clock_time
                 continue
             
             # Extract kernel count
@@ -62,9 +74,11 @@ def parse_log_file(log_file):
             if kernel_count_match and current_b is not None and current_t is not None:
                 range_name = kernel_count_match.group(1)
                 kernel_count = int(kernel_count_match.group(2))
-                if (range_name, current_b, current_t) not in timing_data:
-                    timing_data[(range_name, current_b, current_t)] = {}
-                timing_data[(range_name, current_b, current_t)]['kernel_count'] = kernel_count
+                # Default to NH=12 if not found yet
+                nh = current_nh if current_nh is not None else 12
+                if (range_name, current_b, current_t, nh) not in timing_data:
+                    timing_data[(range_name, current_b, current_t, nh)] = {}
+                timing_data[(range_name, current_b, current_t, nh)]['kernel_count'] = kernel_count
                 continue
             
             # Extract range name from kernel section
@@ -78,7 +92,9 @@ def parse_log_file(log_file):
             if kernel_match and current_range and current_b is not None and current_t is not None:
                 grid = (int(kernel_match.group(1)), int(kernel_match.group(2)), int(kernel_match.group(3)))
                 block = (int(kernel_match.group(4)), int(kernel_match.group(5)), int(kernel_match.group(6)))
-                kernel_configs[(current_range, current_b, current_t)].append((grid, block))
+                # Default to NH=12 if not found yet
+                nh = current_nh if current_nh is not None else 12
+                kernel_configs[(current_range, current_b, current_t, nh)].append((grid, block))
                 continue
     
     return timing_data, kernel_configs
@@ -86,7 +102,7 @@ def parse_log_file(log_file):
 def parse_csv(input_file):
     """
     Parse the input CSV file.
-    Returns a dict: {(range_name, B, T): {metric_name: value}}
+    Returns a dict: {(range_name, B, T, NH): {metric_name: value}}
     Also returns the ordered list of all metrics.
     """
     data = defaultdict(dict)
@@ -96,6 +112,7 @@ def parse_csv(input_file):
     current_config = None
     current_b = None
     current_t = None
+    current_nh = None
     
     with open(input_file, 'r') as f:
         reader = csv.reader(f)
@@ -106,14 +123,14 @@ def parse_csv(input_file):
             if row[0] == 'Config Name':
                 # New configuration
                 current_config = row[1]
-                current_b, current_t = parse_config_name(current_config)
+                current_b, current_t, current_nh = parse_config_name(current_config)
             elif current_b is not None and current_t is not None:
                 # Metric data row
                 range_name = row[0]
                 metric_name = row[1]
                 value = row[2] if len(row) > 2 else ""
                 
-                data[(range_name, current_b, current_t)][metric_name] = value
+                data[(range_name, current_b, current_t, current_nh)][metric_name] = value
                 all_metrics[metric_name] = True
                 range_order[range_name] = True
     
@@ -145,17 +162,17 @@ def write_output(data, all_metrics, range_order, output_file):
         ranges = list(range_order.keys())
         
         # Write column headers
-        header = ['Range', 'B', 'T'] + metrics
+        header = ['Range', 'B', 'T', 'NH'] + metrics
         writer.writerow(header)
         
-        # Get all keys and sort by (range_order, B, T)
-        all_keys = sorted(data.keys(), key=lambda x: (ranges.index(x[0]) if x[0] in ranges else len(ranges), x[1], x[2]))
+        # Get all keys and sort by (range_order, B, T, NH)
+        all_keys = sorted(data.keys(), key=lambda x: (ranges.index(x[0]) if x[0] in ranges else len(ranges), x[1], x[2], x[3] if x[3] is not None else 12))
         
         # Write data rows
-        for range_name, b, t in all_keys:
-            row = [range_name, b, t]
+        for range_name, b, t, nh in all_keys:
+            row = [range_name, b, t, nh if nh is not None else 12]
             for metric in metrics:
-                value = data[(range_name, b, t)].get(metric, '')
+                value = data[(range_name, b, t, nh)].get(metric, '')
                 row.append(value)
             writer.writerow(row)
     
@@ -166,18 +183,19 @@ def write_kernel_configs(kernel_configs, output_file):
     with open(output_file, 'w') as f:
         # Group by range name
         range_dict = defaultdict(lambda: defaultdict(list))
-        for (range_name, b, t), configs in kernel_configs.items():
-            range_dict[range_name][(b, t)] = configs
+        for (range_name, b, t, nh), configs in kernel_configs.items():
+            range_dict[range_name][(b, t, nh)] = configs
         
         for range_name in sorted(range_dict.keys()):
             f.write(f"Range name: {range_name}\n")
             
-            # Get all (b, t) configs for this range
+            # Get all (b, t, nh) configs for this range
             bt_configs = range_dict[range_name]
-            for (b, t) in sorted(bt_configs.keys()):
-                configs = bt_configs[(b, t)]
+            for (b, t, nh) in sorted(bt_configs.keys()):
+                configs = bt_configs[(b, t, nh)]
                 if configs:
-                    f.write(f"  B={b}, T={t}:\n")
+                    nh_val = nh if nh is not None else 12
+                    f.write(f"  B={b}, T={t}, NH={nh_val}:\n")
                     f.write(f"    Kernel launched: ")
                     kernel_strs = []
                     for grid, block in configs:
@@ -191,9 +209,9 @@ def write_kernel_configs(kernel_configs, output_file):
 
 def main():
     # Define file paths here - modify these variables as needed
-    log_file = 'blog2_scaling_logs.txt'
-    input_file = './output/result.csv'
-    output_file = './output/reorganized_metrics.csv'
+    log_file = 'logs_part2.txt'
+    input_file = './output/result_part2.csv'
+    output_file = './output/reorganized_metrics_part2.csv'
     kernel_config_file = './output/kernel_configs.txt'
     
     print(f"Parsing log file: {log_file}...")
