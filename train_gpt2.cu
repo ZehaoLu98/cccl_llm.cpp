@@ -89,6 +89,7 @@ using NV::Cupti::Checkpoint::CUpti_Checkpoint;
             GmpProfiler::getInstance()->popRange(name, GmpProfileType::CONCURRENT_KERNEL); \
         } else { \
             code; \
+            cudaDeviceSynchronize();   \
         } \
     } while(0)
 #else
